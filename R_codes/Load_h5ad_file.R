@@ -1,3 +1,4 @@
+setwd("/nfs/research/petsalaki/users/iguaracy/scRNA_seq_analysis/R/")
 #!/hps/software/users/petsalaki/users/tkoutsandreas/R-4.1.2/bin/Rscript
 
 # AUTHOR: Iguaracy Sousa, Postdoc EMBL-EBI
@@ -7,21 +8,56 @@
 # INPUT: h5ad file
 #
 # OUTPUT: QC and cell type annotation
-library(ggspavis)
-library(ggplot2)
-library(STutility)
-library(EBImage) 
-library(SpotClean)
-library(S4Vectors)
-library(SpatialExperiment)
-library(STdeconvolve)
-library(Matrix)
-library(rhdf5)
+library(Seurat)
+library(dplyr)
 library(zellkonverter)
+library(SingleCellExperiment)
+library(ggplot2)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(EnsDb.Hsapiens.v86)
 library(scater)
-library(patchwork)
-library(scran)
+###Load data
+scRNA_brain <- readH5AD("AD_Brain_analysis/427_ROSMAP_Data/rds_files/course_data_analysis/RNA.h5ad")
+
+#######
+gene_names <- mapIds(org.Hs.eg.db, keys=rownames(scRNA_brain), keytype="SYMBOL", columns="SYMBOL",column="SYMBOL")
 ###
+
+
+##### get a few gene names
+grep("^MT-",rowData(scRNA_brain)$SYMBOL,value = T)
+grep("^RP[LS]",rowData(scRNA_brain)$SYMBOL,value = T)
+grep("ATP8",rowData(scRNA_brain)$SYMBOL,value = T)
+#######
+columns(EnsDb.Hsapiens.v86)
+ensdb_genes <- genes(EnsDb.Hsapiens.v86)
+MT_names <- ensdb_genes[seqnames(ensdb_genes) == "MT"]$gene_name
+is_mito <- rownames(scRNA_brain) %in% MT_names
+table(is_mito)
+#####Basic QC
+assayNames(scRNA_brain)
+assays(scRNA_brain)$counts <- assays(scRNA_brain)$X
+#
+scRNA_brain_cell <- perCellQCMetrics(scRNA_brain,subsets=list(Mito=is_mito))
+scRNA_brain_feature <- perFeatureQCMetrics(scRNA_brain)
+head(scRNA_brain_cell)
+
+##
+plotHighestExprs(scRNA_brain, exprs_values = "counts", 
+                 feature_names_to_plot = "SYMBOL")
+# Only if scRNA_brain_cell contains relevant data that should be in a SingleCellExperiment object
+new_sce_object <- SingleCellExperiment(assays = list(counts = assay(scRNA_brain)), colData = scRNA_brain_cell)
+
+scRNA_brain_cell <- addPerCellQC(scRNA_brain_cell, subsets=list(Mito=is_mito))
+scRNA_brain_cell <- addPerFeatureQC(scRNA_brain_cell)
+####
+scATAC_brain <- readRDS("AD_Brain_analysis/427_ROSMAP_Data/rds_files/course_data_analysis/PeakMatrix.TSS6.cleaned.rds")
+
+
+
+
+Heart_MI <- readRDS("AD_Brain_analysis/427_ROSMAP_Data/rds_files/course_data_analysis/RNA.h5ad")
 Sys.setenv(VROOM_CONNECTION_SIZE = 1048576)  # Setting buffer size to 1 MB
 min_cells <- 3  # Minimum number of cells a gene must be expressed in
 min_features = 200  # Minimum number of features a cell must have
