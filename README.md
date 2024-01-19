@@ -1,3 +1,3 @@
 # brain_AD
 
-Pipeline for single cell and single ATAC cell data integration
+Pipeline for single-cell RNA-seq and ATAC-seq data integration
