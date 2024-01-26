@@ -1,4 +1,3 @@
-reticulate::use_condaenv("/hps/software/users/petsalaki/users/iguaracy/miniconda3/envs/my_r_env/", required = TRUE)
 setwd("/nfs/research/petsalaki/users/iguaracy/scRNA_seq_analysis/R/AD_Brain_analysis/")
 #!/hps/software/users/petsalaki/users/tkoutsandreas/R-4.1.2/bin/Rscript
 
@@ -10,23 +9,14 @@ setwd("/nfs/research/petsalaki/users/iguaracy/scRNA_seq_analysis/R/AD_Brain_anal
 #
 # OUTPUT: QC and cell type annotation
 suppressPackageStartupMessages({
-  library("zellkonverter")
-  library("ggplot2")
-  library("reticulate")
-  library("SingleCellExperiment")
-  library("AnnotationDbi")
-  library("org.Hs.eg.db")
-  library("EnsDb.Hsapiens.v86")
-  library("scater")
-  library("Matrix")
   library("Seurat")
-  library("DoubletFinder")
-  library("dplyr")
+  library("Matrix")
+  library("EnsDb.Hsapiens.v86")
+  library("AnnotationDbi")
   library("Signac")
-  library("biovizBase")
+  library("dplyr")
 })
 
-sc <- import("scanpy")
 #Converting from Python to R
 ###Load data
 # Read the h5ad file
@@ -75,7 +65,7 @@ annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
 seqlevels(annotation) <- paste0('chr', seqlevels(annotation))
 genome(annotation) <- "hg38"
 chrom_assay <- CreateChromatinAssay(counts = counts, ranges = granges, genome = 'hg38',annotation = annotation)
-scRNA_ATAC_brain_seurat[['peaks']] <- chrom_assay
+scRNA_ATAC_brain_seurat[['ATAC']] <- chrom_assay
 
 ########
 ##save data
@@ -85,9 +75,7 @@ saveRDS(scRNA_ATAC_brain_seurat, file = "EBI_course_2024/rds_files/scRNA_ATAC_br
 
 ##
 scRNA_ATAC_brain_seurat <- readRDS("EBI_course_2024/rds_files/scRNA_ATAC_brain_downsampled_data.rds")
-
-# compute nucleosome signal score per cell
-scRNA_ATAC_brain_seurat <- NucleosomeSignal(object = scRNA_ATAC_brain_seurat)
+DefaultAssay(scRNA_ATAC_brain_seurat) <- 'ATAC'
 ######Transcriptional start site (TSS) enrichment score.  Poor ATAC-seq experiments typically will have a low TSS enrichment score
 jpeg("EBI_course_2024/figs/scRNA_ATAC_brain_TSSEnrichment.jpeg",width = 8, height = 7, units = 'in', res=300)
 DensityScatter(scRNA_ATAC_brain_seurat, x = 'nCount_peaks', y = 'TSSEnrichment', log_x = TRUE, quantiles = TRUE)
@@ -101,11 +89,12 @@ VlnPlot(
   ncol = 5
 )
 dev.off()
+
 #Finally we remove cells that are outliers for these QC metrics.
 scRNA_ATAC_brain_seurat <- subset(
   x = scRNA_ATAC_brain_seurat,
   subset = nCount_peaks > 3000 &
-    nCount_peaks < 30000 &
+    nCount_peaks < 40000 &
     BlacklistRatio < 0.05 &
     TSSEnrichment > 3
 )
@@ -115,13 +104,9 @@ scRNA_ATAC_brain_seurat <- FindTopFeatures(scRNA_ATAC_brain_seurat, min.cutoff =
 scRNA_ATAC_brain_seurat <- RunTFIDF(scRNA_ATAC_brain_seurat)
 scRNA_ATAC_brain_seurat <- RunSVD(scRNA_ATAC_brain_seurat)
 
-##
-DepthCor(scRNA_ATAC_brain_seurat)
 
 #Non-linear dimension reduction and clustering
 scRNA_ATAC_brain_seurat <- RunUMAP(object = scRNA_ATAC_brain_seurat, reduction = 'lsi', dims = 2:30)
 DimPlot(object = scRNA_ATAC_brain_seurat, label = TRUE, group.by = "Celltype1") + NoLegend()
-
 ##save data
 saveRDS(scRNA_ATAC_brain_seurat, file = "EBI_course_2024/rds_files/scRNA_ATAC_brain_seurat_QC.rds")
-
