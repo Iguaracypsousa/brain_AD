@@ -13,10 +13,6 @@ suppressPackageStartupMessages({
   library("zellkonverter")
   library("ggplot2")
   library("reticulate")
-  library("SingleCellExperiment")
-  library("AnnotationDbi")
-  library("org.Hs.eg.db")
-  library("EnsDb.Hsapiens.v86")
   library("scater")
   library("Matrix")
   library("Seurat")
@@ -47,17 +43,19 @@ sampled_indices <- unlist(lapply(unique_cell_types, function(cell_type) {
 }))
 
 py_run_string("import anndata")
-scRNA_brain_sampled <- scRNA_brain[sampled_indices, ]
+# Assign the R object to a variable in Python
+py$scRNA_brain_sampled <- scRNA_brain[sampled_indices, ]
+
 #########
 
-#################### extracting counts
+# Assuming you have already loaded your AnnData object into `scRNA_brain_sampled` using reticulate
 
+# Convert the AnnData object's data matrix to a DataFrame and save it
 py_run_string("
 import pandas as pd
-# Example: Exporting a DataFrame to CSV
-# Adjust the command according to the data you need
-df = pd.DataFrame(scRNA_brain_sampled.X.toarray())
-df.to_csv('427_ROSMAP_Data/rds_files/course_data_analysis/counts_downsample_RNA.csv', index=FALSE)
+# Assuming `scRNA_brain_sampled` is already available as an AnnData object
+df = pd.DataFrame(scRNA_brain_sampled.X.toarray()) # Convert sparse matrix to dense if necessary
+df.to_csv('427_ROSMAP_Data/rds_files/course_data_analysis/counts_downsample_RNA.csv', index=False)
 ")
 
 counts <- read.csv('427_ROSMAP_Data/rds_files/course_data_analysis/counts_downsample_RNA.csv')
