@@ -3,7 +3,7 @@ setwd("/nfs/research/petsalaki/users/iguaracy/scRNA_seq_analysis/R/AD_Brain_anal
 
 # AUTHOR: Iguaracy Sousa, Postdoc EMBL-EBI
 #
-# Human adult brain scRNAseq data
+# Human adult brain scATACseq data
 # 
 # INPUT: h5ad file
 #
@@ -15,6 +15,7 @@ suppressPackageStartupMessages({
   library("AnnotationDbi")
   library("Signac")
   library("dplyr")
+  library("SummarizedExperiment")
 })
 
 #Converting from Python to R
@@ -71,7 +72,9 @@ scRNA_ATAC_brain_seurat[['ATAC']] <- chrom_assay
 ##save data
 saveRDS(scRNA_ATAC_brain_seurat, file = "EBI_course_2024/rds_files/scRNA_ATAC_brain_downsampled_data.rds")
 
-######QC amd processing
+
+######QC and processing
+scRNA_ATAC_brain_seurat <- readRDS("EBI_course_2024/rds_files/scRNA_ATAC_brain_downsampled_data.rds")
 
 ##
 scRNA_ATAC_brain_seurat <- readRDS("EBI_course_2024/rds_files/scRNA_ATAC_brain_downsampled_data.rds")
@@ -108,5 +111,46 @@ scRNA_ATAC_brain_seurat <- RunSVD(scRNA_ATAC_brain_seurat)
 #Non-linear dimension reduction and clustering
 scRNA_ATAC_brain_seurat <- RunUMAP(object = scRNA_ATAC_brain_seurat, reduction = 'lsi', dims = 2:30)
 DimPlot(object = scRNA_ATAC_brain_seurat, label = TRUE, group.by = "Celltype1") + NoLegend()
+
+
+#Add the Gene score to the ATAC-seq object 
+metadata_scRNA_ATAC_brain_seurat <- scRNA_ATAC_brain_seurat@meta.data
+scRNA_ATAC_brain_geneScore <- readRDS("427_ROSMAP_Data/rds_files/course_data_analysis/GeneScoreMatrix.TSS6.cleaned.rds")
+##get Gene score 
+metadata_geneScore <- as.data.frame(colData(scRNA_ATAC_brain_geneScore))
+# Extract gene names or identifiers from rowData
+gene_names <- rowData(scRNA_ATAC_brain_geneScore)$name
+
+
+# Check the first few names to ensure they are what you expect
+head(gene_names)
+
+
+# Find common row names with scRNA_ATAC_brain_seurat
+DefaultAssay(scRNA_ATAC_brain_seurat) <- 'RNA'
+common_rows <- intersect(rownames(metadata_scRNA_ATAC_brain_seurat), rownames(metadata_geneScore))
+
+# Subset both data frames to keep only rows with common row names
+metadata_geneScore <- metadata_geneScore[common_rows, ]
+##select fragments
+metadata_geneScore
+
+# Extract the counts matrix again
+GeneScoreMatrix <- assay(scRNA_ATAC_brain_geneScore, "GeneScoreMatrix")
+# Ensure the length of gene_names matches the number of rows in filtered_matrix
+if (length(gene_names) == nrow(GeneScoreMatrix)) {
+  rownames(GeneScoreMatrix) <- gene_names
+} else {
+  stop("The number of gene names does not match the number of rows in the filtered matrix.")
+}
+# Assuming `metadata_geneScore` holds relevant identifiers in its rows or a specific column
+# If the metadata contains cell identifiers and you want to filter cells:
+common_cells <- intersect(colnames(GeneScoreMatrix), rownames(metadata_geneScore))  # Adjust as necessary
+# Filter columns
+filtered_matrix <- GeneScoreMatrix[, common_cells]
+rownames(filtered_matrix)
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+scRNA_ATAC_brain_seurat[['ACTIVITY']] <- CreateAssayObject(counts = filtered_matrix)
+
 ##save data
 saveRDS(scRNA_ATAC_brain_seurat, file = "EBI_course_2024/rds_files/scRNA_ATAC_brain_seurat_QC.rds")
