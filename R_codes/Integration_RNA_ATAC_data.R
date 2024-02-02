@@ -21,11 +21,11 @@ suppressPackageStartupMessages({
 scRNA_brain <- readRDS("EBI_course_2024/rds_files/scRNA_brain_seurat_QC.rds")
 scATAC_brain <- readRDS("EBI_course_2024/rds_files/scRNA_ATAC_brain_seurat_QC.rds")
 ####satijalab.org/seurat/articles/seurat5_atacseq_integration_vignette
-p1 <- DimPlot(scRNA_brain, group.by = "major.celltype", label = TRUE) + NoLegend() + ggtitle("RNA")
-p2 <- DimPlot(scATAC_brain,group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("ATAC")
+RNA <- DimPlot(scRNA_brain, group.by = "major.celltype", label = TRUE) + NoLegend() + ggtitle("RNA")
+ATAC <- DimPlot(scATAC_brain,group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("ATAC")
 ##
 jpeg("EBI_course_2024/figs/scRNA_ATAC_brain_cell_types_.jpeg",width = 11, height = 7, units = 'in', res=300)
-p1 + p2
+RNA + ATAC
 dev.off()
 
 
@@ -35,6 +35,12 @@ DefaultAssay(scATAC_brain) <- "ACTIVITY"
 scATAC_brain <- NormalizeData(scATAC_brain)
 scATAC_brain <- ScaleData(scATAC_brain, features = rownames(scATAC_brain))
 
+##save data
+saveRDS(scATAC_brain, file = "EBI_course_2024/rds_files/scRNA_ATAC_brain_ACTIVITY_norm.rds")
+
+## we can use scRNAseq to annotate the cell types from ATACseq; because we are using already the cells annotated from the study and downsampled can infer the integration results 
+##we will use prior group annotation, however we will show how the transfer label process works
+###
 transfer.anchors <- FindTransferAnchors(reference = scRNA_brain, query = scATAC_brain, features = VariableFeatures(object = scRNA_brain),
                                         reference.assay = "RNA", query.assay = "ACTIVITY",reduction = "cca")
 
@@ -47,9 +53,9 @@ scATAC_brain <- AddMetaData(scATAC_brain, metadata = celltype.predictions)
 ###
 
 scATAC_brain$annotation_correct <- scATAC_brain$predicted.id == scATAC_brain$Celltype1
-p1 <- DimPlot(scATAC_brain, group.by = "predicted.id", label = TRUE) + NoLegend() + ggtitle("Predicted annotation")
-p2 <- DimPlot(scATAC_brain, group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("Ground-truth annotation")
-p1 | p2
+ATAC_predicted_cell_type <- DimPlot(scATAC_brain, group.by = "predicted.id", label = TRUE) + NoLegend() + ggtitle("Predicted annotation")
+ATAC_cell_type <- DimPlot(scATAC_brain, group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("Ground-truth annotation")
+ATAC_predicted_cell_type | ATAC_cell_type
 
 ####
 predictions <- table(scATAC_brain$Celltype1, scATAC_brain$predicted.id)
@@ -67,6 +73,11 @@ p2 <- ggplot(data, aes(prediction.score.max, fill = annotation_correct, colour =
                                                                     labels = c(paste0("FALSE (n = ", incorrect, ")"), paste0("TRUE (n = ", correct, ")"))) + scale_color_discrete(name = "Annotation Correct",
                                                                                                                                                                                   labels = c(paste0("FALSE (n = ", incorrect, ")"), paste0("TRUE (n = ", correct, ")"))) + xlab("Prediction Score")
 p1 + p2
+# Assuming you have your predictions in a format that can be easily added to the Seurat object
+# Add the predicted cell types to the scATAC_brain object
+scATAC_brain$predicted_celltype <- scATAC_brain$predicted.id # your predicted cell type vector
+DimPlot(object = scATAC_brain, label = TRUE, group.by = "predicted_celltype") + NoLegend()
+
 
 ######Merge process
 # first add dataset-identifying metadata
@@ -93,9 +104,7 @@ merged_RNA_ATAC <- RunPCA(merged_RNA_ATAC, features = genes.use, verbose = FALSE
 merged_RNA_ATAC <- RunUMAP(merged_RNA_ATAC, dims = 1:30)
 
 ###
-# Assuming you have your predictions in a format that can be easily added to the Seurat object
-# Add the predicted cell types to the scATAC_brain object
-scATAC_brain$predicted_celltype <- scATAC_brain$predicted.id # your predicted cell type vector
+
 
 # Since you've already merged the datasets, you'll need to add the predicted cell type to the merged object
 # First, we need to find out which cells in the merged object come from the ATAC dataset
@@ -106,36 +115,31 @@ atac_cells <- WhichCells(merged_RNA_ATAC, expression = dataset == "ATAC")
 
 # Add the predictions to the merged object
 merged_RNA_ATAC$major.celltype[atac_cells] <- scATAC_brain$predicted_celltype
-Idents(scATAC_brain) <- scATAC_brain$predicted_celltype
+
 # Now, you can visualize or analyze the merged object with the added predictions
 # For example, replotting UMAP with the new cell type annotations
-DimPlot(merged_RNA_ATAC, group.by = "predicted_celltype")
-
-DimPlot(merged_RNA_ATAC, group.by = c("dataset", "major.celltype"))
+DimPlot(merged_RNA_ATAC, group.by = c("dataset", "major.celltype", "Pathology"))
 
 
 merged_RNA_ATAC_metadata <- merged_RNA_ATAC@meta.data
-######Gene for microgolia
-jpeg("figs/FeaturePlot_ECs_All_markers_and_VWF.jpeg",width = 13, height = 9, units = 'in', res=150)
-FeaturePlot(merged_RNA_ATAC,c("SPI1","IRF8","CEBPA"),min.cutoff = 0,raster=FALSE)
-dev.off()
+######Gene for microgolia (Which genes we check?)
+RNA + ATAC
 
-
-
-### ploting Cells marekrs
+### ploting Cells marekrs 
 DefaultAssay(scRNA_brain) <- "RNA"
 
 SPI1_RNA <- FeaturePlot(scRNA_brain,"SPI1",min.cutoff = 0,raster=FALSE) + 
-  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "Spectral"))) + ggtitle("SPI1 - Microglia - RNA")
+  scale_colour_gradientn(colours = brewer.pal(n = 11, name = "Reds")) + ggtitle("SPI1 - Microglia - RNA")
 
 
 DefaultAssay(scATAC_brain) <- "ACTIVITY"
 
 SPI1_ATAC <- FeaturePlot(scATAC_brain,"SPI1",min.cutoff = 0,raster=FALSE) + 
-  scale_colour_gradientn(colours = rev(brewer.pal(n = 11, name = "Spectral"))) + ggtitle("SPI1 - Microglia - ATAC")
-
+  scale_colour_gradientn(colours = brewer.pal(n = 11, name = "Reds")) + ggtitle("SPI1 - Microglia - ATAC")
 
 
 jpeg("EBI_course_2024/figs/UMAP_Microglia_Marker_RNA_ATAC.jpeg",width = 10, height =7, units = 'in', res=200)
 plot_grid(SPI1_RNA,SPI1_ATAC)
 dev.off()
+
+####For the downstream analysis we will combined the results from ATAC-seq and RNA-seq and won't require using the RNAseq and ATACseq integrated. 
