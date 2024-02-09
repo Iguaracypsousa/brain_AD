@@ -58,4 +58,18 @@ scRNA_brain_acts <- scRNA_brain_acts %>%
   filter(statistic == 'norm_wmean', p_value < 0.05)
 scRNA_brain_acts
 
-write_csv(scRNA_brain_acts, "EBI_course_2024/TF_activity/scRNA_brain_collectTRI.csv")
+# Filter rows for early_AD
+early_AD <- scRNA_brain_acts %>%
+  filter(grepl("earlyAD", condition))
+
+# Filter rows for non_AD
+non_AD <- scRNA_brain_acts %>%
+  filter(grepl("nonAD", condition))
+
+# Filter rows for lateAD
+lateAD <- scRNA_brain_acts %>%
+  filter(grepl("lateAD", condition))
+
+write_csv(early_AD, "EBI_course_2024/TF_activity/scRNA_brain_earlyAD_collectTRI.csv")
+write_csv(non_AD, "EBI_course_2024/TF_activity/scRNA_brain_nonAD_collectTRI.csv")
+write_csv(lateAD, "EBI_course_2024/TF_activity/scRNA_brain_lateAD_collectTRI.csv")
