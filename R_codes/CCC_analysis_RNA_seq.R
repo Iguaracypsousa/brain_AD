@@ -20,11 +20,11 @@ suppressPackageStartupMessages({
 
 
 ####load data
-scATAC_brain <- readRDS("EBI_course_2024/rds_files/scRNA_brain_seurat_QC.rds")
+scRNA_brain <- readRDS("EBI_course_2024/rds_files/scRNA_brain_seurat_QC.rds")
 
-Idents(scATAC_brain) <- scATAC_brain$major.celltype
+Idents(scRNA_brain) <- scRNA_brain$major.celltype
 # Split the data by 'Pathology'
-data_split <- SplitObject(scATAC_brain, split.by = "Pathology")
+data_split <- SplitObject(scRNA_brain, split.by = "Pathology")
 
 # Initialize a list to store LIANA results
 liana_results <- list()
@@ -67,7 +67,7 @@ for (subset_name in names(liana_results)) {
   print(paste("Results saved for", subset_name, "in", csv_filename))
 }
 #### Check some cell-cell interactions by pathology
-major.celltype <- levels(scATAC_brain$major.celltype)
+major.celltype <- levels(scRNA_brain$major.celltype)
 major.celltype
 
 # Specify the cell type of interest
@@ -103,11 +103,8 @@ dotplot_Mic_source_lateAD
 
 ###
 jpeg("EBI_course_2024/figs/Microglia_source_cell_type_nonAD_EarlyAD_LateAD.jpeg",width = 32, height = 12,units = "in", res=200)
-
-
 (dotplot_Mic_source_nonAD | dotplot_Mic_source_earlyAD | dotplot_Mic_source_lateAD) +
   plot_annotation(title = "LIANA Dot Plots: Non AD vs Early AD vs Late AD")
-
 dev.off()
 
 ##cell receiving the signal (Receptor)

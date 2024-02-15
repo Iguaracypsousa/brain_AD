@@ -153,4 +153,4 @@ rownames(filtered_matrix)
 scRNA_ATAC_brain_seurat[['ACTIVITY']] <- CreateAssayObject(counts = filtered_matrix)
 
 ##save data
-saveRDS(scRNA_ATAC_brain_seurat, file = "EBI_course_2024/rds_files/scRNA_ATAC_brain_seurat_QC.rds")
+saveRDS(scRNA_ATAC_brain_seurat, file = "EBI_course_2024/rds_files/scATAC_brain_seurat_QC.rds")

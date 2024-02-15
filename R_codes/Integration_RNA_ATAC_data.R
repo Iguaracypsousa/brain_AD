@@ -19,15 +19,26 @@ suppressPackageStartupMessages({
 ###Seurat pipeline
 ###Load files 
 scRNA_brain <- readRDS("EBI_course_2024/rds_files/scRNA_brain_seurat_QC.rds")
-scATAC_brain <- readRDS("EBI_course_2024/rds_files/scRNA_ATAC_brain_seurat_QC.rds")
+scATAC_brain <- readRDS("EBI_course_2024/rds_files/scATAC_brain_seurat_QC.rds")
 ####satijalab.org/seurat/articles/seurat5_atacseq_integration_vignette
 RNA <- DimPlot(scRNA_brain, group.by = "major.celltype", label = TRUE) + NoLegend() + ggtitle("RNA")
 ATAC <- DimPlot(scATAC_brain,group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("ATAC")
 ##
+RNA + ATAC
+
+###Keep the same cell type names
+Idents(scATAC_brain) <- scATAC_brain$Celltype1
+
+####RNA cell annotation
+new.cluster.ids <- levels(scRNA_brain$major.celltype)
+current.cluster.ids <- levels(scATAC_brain)
+scATAC_brain@active.ident <- plyr::mapvalues(x = scATAC_brain@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(scATAC_brain, pt.size = 0.001,label = T, raster=FALSE,label.size = 4)
+ATAC <- DimPlot(scATAC_brain, label = TRUE) + NoLegend() + ggtitle("ATAC")
+
 jpeg("EBI_course_2024/figs/scRNA_ATAC_brain_cell_types_.jpeg",width = 11, height = 7, units = 'in', res=300)
 RNA + ATAC
 dev.off()
-
 
 ##Identifying anchors between scRNA-seq and scATAC-seq datasets
 # normalize gene activities
@@ -36,7 +47,7 @@ scATAC_brain <- NormalizeData(scATAC_brain)
 scATAC_brain <- ScaleData(scATAC_brain, features = rownames(scATAC_brain))
 
 ##save data
-saveRDS(scATAC_brain, file = "EBI_course_2024/rds_files/scRNA_ATAC_brain_ACTIVITY_norm.rds")
+saveRDS(scATAC_brain, file = "EBI_course_2024/rds_files/scATAC_brain_ACTIVITY_norm.rds")
 
 ## we can use scRNAseq to annotate the cell types from ATACseq; because we are using already the cells annotated from the study and downsampled can infer the integration results 
 ##we will use prior group annotation, however we will show how the transfer label process works
@@ -79,6 +90,9 @@ scATAC_brain$predicted_celltype <- scATAC_brain$predicted.id # your predicted ce
 DimPlot(object = scATAC_brain, label = TRUE, group.by = "predicted_celltype") + NoLegend()
 
 
+
+scATAC_brain@active.ident <- plyr::mapvalues(x = scATAC_brain@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(scATAC_brain, pt.size = 0.001,label = T, raster=FALSE,label.size = 4)
 ######Merge process
 # first add dataset-identifying metadata
 scATAC_brain$dataset <- "ATAC"
@@ -120,10 +134,12 @@ merged_RNA_ATAC$major.celltype[atac_cells] <- scATAC_brain$predicted_celltype
 # For example, replotting UMAP with the new cell type annotations
 DimPlot(merged_RNA_ATAC, group.by = c("dataset", "major.celltype", "Pathology"))
 
-
 merged_RNA_ATAC_metadata <- merged_RNA_ATAC@meta.data
-######Gene for microgolia (Which genes we check?)
+
 RNA + ATAC
+
+####
+
 
 ### ploting Cells marekrs 
 DefaultAssay(scRNA_brain) <- "RNA"
