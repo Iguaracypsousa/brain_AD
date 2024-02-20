@@ -20,7 +20,6 @@ suppressPackageStartupMessages({
   library("patchwork")
   library("motifmatchr")
   library("ggseqlogo")
-  library("dplyr")
 })
 ###
 # Load your scATAC-seq data
@@ -183,6 +182,7 @@ final_dfs <- lapply(enriched_motifs_dfs, function(condition_list) {
 # Name the list elements for clarity
 names(final_dfs) <- c("nonAD", "earlyAD", "lateAD")
 nonAD_TFs <- final_dfs$nonAD %>% filter(p.adjust < 0.05)
+
 earlyAD_TFs <- final_dfs$earlyAD %>% filter(p.adjust < 0.05)
 lateAD_TFs <- final_dfs$lateAD %>% filter(p.adjust < 0.05)
 
@@ -191,15 +191,12 @@ write_csv(earlyAD_TFs, "EBI_course_2024/TF_activity/scATAC_brain_earlyAD.csv")
 write_csv(lateAD_TFs, "EBI_course_2024/TF_activity/scATAC_brain_lateAD.csv")
 
 ###checking the motifs
+#choose a cell type and condition / here Microglia and nonAD
 MotifPlot(
   object = data_split_motifs$nonAD,
   motifs = head(rownames(enriched_motifs_results$Mic$nonAD))
 )
 
-####Load TF activity from scRNA-seq and keep the TFs from both analysis
-scRNA_brain_earlyAD_collectTRI <- read_csv("EBI_course_2024/TF_activity/scRNA_brain_earlyAD_collectTRI.csv")
-scRNA_brain_nonAD_collectTRI <- read_csv("EBI_course_2024/TF_activity/scRNA_brain_nonAD_collectTRI.csv")
-scRNA_brain_lateAD_collectTRI <- read_csv("EBI_course_2024/TF_activity/scRNA_brain_lateAD_collectTRI.csv")
 
 
-###keep one file for the TF activity
+

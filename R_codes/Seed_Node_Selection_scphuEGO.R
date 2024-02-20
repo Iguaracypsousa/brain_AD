@@ -7,7 +7,7 @@ setwd("/nfs/research/petsalaki/users/iguaracy/scRNA_seq_analysis/R/AD_Brain_anal
 # 
 # INPUT: CCC results, TF activity and DEGs
 #
-# OUTPUT: Seed nodes for scphuEGO
+# OUTPUT: Seed nodes for scphuEGO - receptors, TFs and DEGs
 suppressPackageStartupMessages({
   library("tidyverse")
   library("magrittr")
@@ -15,6 +15,10 @@ suppressPackageStartupMessages({
   library("enrichR")
 })
 #######
+##Here we will perform enrichment analysis on the receptors and TFs for each cell type by pathology
+##Then we will only keep the DEGs downstream to enriched pathways for receptors and TFs
+#The goal is to decrease the noise when extracting the networks signalling cell type specific, instead of using all DEGs for each cell cluster
+## scphuego uses the three layers of signal propagation: receptors, TFs and DEGs
 ##Load BP pathways and Genes
 BP_Genes_GO_BP <- read_csv("EBI_course_2024/BP_Pathways/BP_All_genes.csv")
 ##choose the dataset for enrichment
@@ -27,7 +31,7 @@ scRNA_brain <- readRDS("EBI_course_2024/rds_files/scRNA_brain_seurat_QC.rds")
 cell_types <- levels(scRNA_brain$major.celltype)
 groups <- levels(scRNA_brain$Pathology)
 groups
-###get the receptors by cell type
+###get the differentially expressed receptors by cell type
 # Define the function to load tables and process data
 load_tables <- function(cell_type, degs_file, ccc_file) {
   # Load merged CCC results and ensure it has the correct columns
@@ -69,7 +73,7 @@ for (group in groups) {
 }
 
 # Define the function to get enriched genes Fro receptors and TFs by pathology
-get_enriched_genes <- function(receptor_file, tf_file,cell_type, output_file) {
+get_enriched_genes <- function(receptor_file, tf_RNA_file,tf_ATAC_file,cell_type, output_file) {
   
   # Read receptor data
   receptors <- read_csv(receptor_file) %>%
@@ -77,15 +81,23 @@ get_enriched_genes <- function(receptor_file, tf_file,cell_type, output_file) {
   colnames(receptors) <- c("SYMBOL","logFC")
   
   # Read TF data
-  tfs <- read_csv(tf_file) %>%
+  tfs_RNA <- read_csv(tf_RNA_file) %>%
     filter(condition == cell_type) %>%
     select(source, score) %>%
     arrange(desc(score)) %>%
     slice_head(n = 10)
-  colnames(tfs) <- c("SYMBOL", "score")
+  colnames(tfs_RNA) <- c("SYMBOL", "score")
+  
+  tfs_ATAC <- read_csv(tf_ATAC_file) %>%
+    filter(cell_type == !!cell_type) %>%
+    select(motif.name, fold.enrichment) %>%
+    arrange(desc(fold.enrichment)) %>%
+    slice_head(n = 10)
+  
   
   # Combine receptor and TF data
-  rec_tf <- bind_rows(receptors, tfs)
+  rec_tf <- bind_rows(receptors, tfs_RNA)
+  rec_tf <- bind_rows(rec_tf, tfs_ATAC)
   
   # Perform enrichment analysis
   enrich_results <- enrichr(rec_tf$SYMBOL, database = "GO_Biological_Process_2023")
@@ -111,15 +123,16 @@ for (group in groups) {
   for (cell_type in cell_types) {
     # Construct file paths for receptors and TF activities
     receptor_file <- paste0("EBI_course_2024/Table_receptors/", group,"_", cell_type, "_DEG_receptors.csv")
-    tf_file <- paste0("EBI_course_2024/TF_activity/scRNA_brain_", group, "_collectTRI.csv")
+    tf_RNA_file <- paste0("EBI_course_2024/TF_activity/scRNA_brain_", group, "_collectTRI.csv")
+    tf_ATAC_file <- paste0("EBI_course_2024/TF_activity/scATAC_brain_", group, ".csv")
     
     # Define output files
     output_file <- paste0("EBI_course_2024/BP_Pathways/Recp_TFs_", cell_type, "_", group, "_enriched.csv")
     
     # Check if receptor and TF activity files exist
-    if (file.exists(receptor_file) && file.exists(tf_file)) {
+    if (file.exists(receptor_file) && file.exists(tf_RNA_file) && file.exists(tf_ATAC_file)) {
       # Run the function
-      get_enriched_genes(receptor_file, tf_file, cell_type, output_file)
+      get_enriched_genes(receptor_file, tf_RNA_file,tf_ATAC_file, cell_type, output_file)
     } else {
       message(paste("Files for group", group, "and cell type", cell_type, "do not exist. Skipping..."))
     }
@@ -131,10 +144,11 @@ process_cell_type_group <- function(cell_type, group) {
   degs_file <- paste0("EBI_course_2024/Table_DEGs/Brain_DEGs_", group, "_", cell_type, ".csv")
   genes_paths_file <- paste0("EBI_course_2024/BP_Pathways/Recp_TFs_", cell_type, "_", group, "_enriched.csv")
   receptors_file <- paste0("EBI_course_2024/Table_receptors/", group,"_", cell_type, "_DEG_receptors.csv")
-  tfs_file <- paste0("EBI_course_2024/TF_activity/scRNA_brain_", group, "_collectTRI.csv")
+  tf_RNA_file <- paste0("EBI_course_2024/TF_activity/scRNA_brain_", group, "_collectTRI.csv")
+  tf_ATAC_file <- paste0("EBI_course_2024/TF_activity/scATAC_brain_", group, ".csv")
   
   # Check if the necessary files exist
-  if (file.exists(degs_file) && file.exists(genes_paths_file) && file.exists(receptors_file) && file.exists(tfs_file)) {
+  if (file.exists(degs_file) && file.exists(genes_paths_file) && file.exists(receptors_file) && file.exists(tf_RNA_file) && file.exists(tf_ATAC_file)) {
     # Load necessary data
     uniprot_to_gene <- read.table("EBI_course_2024/Network_files/uniprot_to_gene.tab", header = F, sep = "\t") %>%
       rename(Protein = V1, SYMBOL = V2) %>%
@@ -164,12 +178,21 @@ process_cell_type_group <- function(cell_type, group) {
     degs_filtered <- degs_filtered %>%
       filter(!SYMBOL %in% receptors_data$SYMBOL)
     
-    # Load TF activities
-    tfs_data <- read_csv(tfs_file) %>%
+    # Load TF data
+    tfs_RNA <- read_csv(tf_RNA_file) %>%
       filter(condition == cell_type) %>%
+      select(source, score) %>%
       arrange(desc(score)) %>%
-      slice_head(n = 10) %>%
-      rename(SYMBOL = source, RWRS = score)
+      slice_head(n = 10)
+    colnames(tfs_RNA) <- c("SYMBOL", "RWRS")
+    
+    tfs_ATAC <- read_csv(tf_ATAC_file) %>%
+      filter(cell_type == !!cell_type) %>%
+      select(motif.name, fold.enrichment) %>%
+      arrange(desc(fold.enrichment)) %>%
+      slice_head(n = 10)
+    colnames(tfs_ATAC) <- c("SYMBOL", "RWRS")
+    tfs_data <- bind_rows(tfs_RNA, tfs_ATAC)
     
     # Merge tables
     merged_data <- full_join(degs_filtered, receptors_data) %>%
@@ -181,7 +204,7 @@ process_cell_type_group <- function(cell_type, group) {
     output_file_csv <- paste0("EBI_course_2024/seed_nodes_scphuEGO/", cell_type, "_", group, "_seed_nodes_phuego.csv")
     output_file_txt <- paste0("EBI_course_2024/seed_nodes_scphuEGO/", cell_type, "_", group, "_seed_nodes_phuego.txt")
     write_csv(merged_data, output_file_csv)
-    merged_data_2 <- merged_data[,c(6,2)]
+    merged_data_2 <- merged_data[, c("Protein", "RWRS")]
     write.table(merged_data_2, output_file_txt, col.names = F, sep = "\t", row.names = F, quote = F)
   } else {
     message("Files for group ", group, " and cell type ", cell_type, " do not exist. Skipping...")
