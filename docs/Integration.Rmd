@@ -1,0 +1,238 @@
+---
+title: "Tutorial 3. Multiomics integration"
+author: "Iguaracy Souza and Umran YAMAN"
+date: 'Compiled: `r Sys.Date()`'  
+output: 
+  html_document:
+    toc: TRUE
+    code_folding:  "show"
+    theme: united
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 95),
+  warning = FALSE,
+  error = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  fig.width = 8,
+  time_it = TRUE
+)
+```
+
+
+
+
+### Data and library import
+
+Load necessary libraries, and read in the preprocessed scRNA-seq and scATAC-seq datasets.
+
+```{r}
+suppressPackageStartupMessages({
+  library("Signac")
+  library("Seurat")
+  library("EnsDb.Hsapiens.v86")
+  library("ggplot2")
+  library("cowplot")
+  library("RColorBrewer")
+})
+```
+
+
+```{r}
+scRNA_brain <- readRDS("../data/scRNA_brain_seurat_QC.rds")
+scATAC_brain <- readRDS("../data/scATAC_seurat_QC_fix.rds")
+```
+
+Visualize cell populations for both datasets using dimensional reduction techniques (t-SNE or UMAP). Dimensional reduction techniques like t-SNE or UMAP visualises high-dimensional data in lower dimensions, making it easier to identify distinct cell populations or clusters within the datasets. This is an initial exploration of the data, and one can also use these to visualise clusters (e.g. cell types) or for QC steps e.g. assess the quality of the datasets and the presence of any batch effects.
+
+```{r}
+RNA <- DimPlot(scRNA_brain, group.by = "major.celltype", label = TRUE) + NoLegend() + ggtitle("RNA")
+ATAC <- DimPlot(scATAC_brain,group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("ATAC")
+##
+RNA + ATAC
+```
+
+```{r}
+###Keep the same cell type names
+Idents(scATAC_brain) <- scATAC_brain$Celltype1
+
+####RNA cell annotation
+new.cluster.ids <- levels(scRNA_brain$major.celltype)
+current.cluster.ids <- levels(scATAC_brain)
+scATAC_brain@active.ident <- plyr::mapvalues(x = scATAC_brain@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(scATAC_brain, pt.size = 0.001,label = T, raster=FALSE,label.size = 4)
+ATAC <- DimPlot(scATAC_brain, label = TRUE) + NoLegend() + ggtitle("ATAC")
+
+RNA + ATAC
+```
+
+
+### Identifying anchors between scRNA-seq and scATAC-seq datasets
+
+By identifying anchors, we can find shared cell types or states between the scRNA-seq and scATAC-seq datasets. This step is to integrate information across modalities and relate the gene expression profiles from scRNA-seq to the chromatin accessibility profiles from scATAC-seq.
+
+### Normalize gene activities
+
+Set assay and normalize data for scATAC-seq, find transfer anchors between scRNA-seq and scATAC-seq datasets, and annotate scATAC-seq cells using label transfer.
+
+
+```{r}
+DefaultAssay(scATAC_brain) <- "ACTIVITY"
+scATAC_brain <- NormalizeData(scATAC_brain)
+scATAC_brain <- ScaleData(scATAC_brain, features = rownames(scATAC_brain))
+
+##save data
+saveRDS(scATAC_brain, file = "../data/scATAC_brain_ACTIVITY_norm.rds")
+
+## we can use scRNAseq to annotate the cell types from ATACseq; because we are using already the cells annotated from the study and downsampled can infer the integration results 
+##we will use prior group annotation, however we will show how the transfer label process works
+###
+transfer.anchors <- FindTransferAnchors(reference = scRNA_brain, query = scATAC_brain, features = VariableFeatures(object = scRNA_brain),
+                                        reference.assay = "RNA", query.assay = "ACTIVITY",reduction = "cca")
+
+#Annotate scATAC-seq cells via label transfer
+celltype.predictions <- TransferData(anchorset = transfer.anchors, refdata = scRNA_brain$major.celltype,
+                                     weight.reduction = scATAC_brain[["lsi"]], dims = 2:30)
+
+scATAC_brain <- AddMetaData(scATAC_brain, metadata = celltype.predictions)
+```
+
+### Compare predicted annotations with ground-truth annotations:
+
+In this step,after predicting cell type annotations for the scATAC-seq dataset, we compare them with the ground-truth annotations to assess the performance of the integration method. This step is to validate the accuracy of the integration and identify any discrepancies or misclassifications.
+
+```{r}
+scATAC_brain$annotation_correct <- scATAC_brain$predicted.id == scATAC_brain$Celltype1
+ATAC_predicted_cell_type <- DimPlot(scATAC_brain, group.by = "predicted.id", label = TRUE) + NoLegend() + ggtitle("Predicted annotation")
+ATAC_cell_type <- DimPlot(scATAC_brain, group.by = "Celltype1", label = TRUE) + NoLegend() + ggtitle("Ground-truth annotation")
+ATAC_predicted_cell_type | ATAC_cell_type
+```
+
+Visualize the agreement between predicted and ground-truth annotations, and plot density of prediction scores. Here we are basically creating a unified representation of the cellular landscape, enabling comprehensive downstream analysis.
+
+```{r}
+predictions <- table(scATAC_brain$Celltype1, scATAC_brain$predicted.id)
+predictions <- predictions/rowSums(predictions)  # normalize for number of cells in each cell type
+predictions <- as.data.frame(predictions)
+p1 <- ggplot(predictions, aes(Var1, Var2, fill = Freq)) + geom_tile() + scale_fill_gradient(name = "Fraction of cells",
+                                                                                            low = "#ffffc8", high = "#7d0025") + xlab("Cell type annotation (RNA)") + ylab("Predicted cell type label (ATAC)") +
+  theme_cowplot() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+correct <- length(which(scATAC_brain$Celltype1 == scATAC_brain$predicted.id))
+incorrect <- length(which(scATAC_brain$Celltype1 != scATAC_brain$predicted.id))
+data <- FetchData(scATAC_brain, vars = c("prediction.score.max", "annotation_correct"))
+p2 <- ggplot(data, aes(prediction.score.max, fill = annotation_correct, colour = annotation_correct)) +
+  geom_density(alpha = 0.5) + theme_cowplot() + scale_fill_discrete(name = "Annotation Correct",
+                                                                    labels = c(paste0("FALSE (n = ", incorrect, ")"), paste0("TRUE (n = ", correct, ")"))) + scale_color_discrete(name = "Annotation Correct",
+                                                                                                                                                                                  labels = c(paste0("FALSE (n = ", incorrect, ")"), paste0("TRUE (n = ", correct, ")"))) + xlab("Prediction Score")
+p1
+p2
+
+
+# Assuming you have your predictions in a format that can be easily added to the Seurat object
+# Add the predicted cell types to the scATAC_brain object
+scATAC_brain$predicted_celltype <- scATAC_brain$predicted.id # your predicted cell type vector
+DimPlot(object = scATAC_brain, label = TRUE, group.by = "predicted_celltype") + NoLegend()
+
+
+
+scATAC_brain@active.ident <- plyr::mapvalues(x = scATAC_brain@active.ident, from = current.cluster.ids, to = new.cluster.ids)
+DimPlot(scATAC_brain, pt.size = 0.001,label = T, raster=FALSE,label.size = 4)
+```
+
+### Merge process
+
+First add dataset-identifying metadata; note that we restrict the imputation to variable genes from scRNA-seq, but could impute the full transcriptome if we wanted to. Refdata (input) contains a scRNA-seq expression matrix for the scRNA-seq cells. The imputation (output) will contain an imputed scRNA-seq matrix for each of the ATAC cells.
+
+
+```{r}
+# first add dataset-identifying metadata
+scATAC_brain$dataset <- "ATAC"
+scRNA_brain$dataset <- "RNA"
+# note that we restrict the imputation to variable genes from scRNA-seq, but could impute the
+# full transcriptome if we wanted to
+genes.use <- VariableFeatures(scRNA_brain)
+refdata <- GetAssayData(scRNA_brain, assay = "RNA", slot = "data")[genes.use, ]
+
+# refdata (input) contains a scRNA-seq expression matrix for the scRNA-seq cells.  imputation
+# (output) will contain an imputed scRNA-seq matrix for each of the ATAC cells
+imputation <- TransferData(anchorset = transfer.anchors, refdata = refdata, weight.reduction = scATAC_brain[["lsi"]],
+                           dims = 2:30)
+scATAC_brain[["RNA"]] <- imputation
+
+merged_RNA_ATAC <- merge(x = scRNA_brain, y = scATAC_brain)
+```
+
+### Process the combined dataset
+
+This step involves scaling the data and performing principal component analysis (PCA) and uniform manifold approximation and projection (UMAP) to reduce dimensionality and visualize the combined dataset in a lower-dimensional space. These techniques facilitate the exploration and interpretation of the integrated data.
+
+
+Finally, we run PCA and UMAP on this combined object, to visualize the co-embedding of both datasets:
+
+```{r}
+# Finally, we run PCA and UMAP on this combined object, to visualize the co-embedding of both
+# datasets
+merged_RNA_ATAC <- ScaleData(merged_RNA_ATAC, features = genes.use, do.scale = FALSE)
+merged_RNA_ATAC <- RunPCA(merged_RNA_ATAC, features = genes.use, verbose = FALSE)
+merged_RNA_ATAC <- RunUMAP(merged_RNA_ATAC, dims = 1:30)
+```
+
+Assuming you have your predictions in a format that can be easily added to the Seurat object, add the predicted cell types to the scATAC_brain object. 
+
+Since you've already merged the datasets, you'll need to add the predicted cell type to the merged object. First, we need to find out which cells in the merged object come from the ATAC dataset, assuming that 'dataset' metadata is preserved in the merged object. Adding the predicted cell type annotations allows us to annotate the cells in the merged dataset based on the integration results. This step enables us to perform downstream analyses, such as cell type-specific differential expression analysis or cell type-specific functional enrichment analysis.
+
+```{r}
+# Get indices of ATAC cells in the merged object
+atac_cells <- WhichCells(merged_RNA_ATAC, expression = dataset == "ATAC")
+
+# Add the predictions to the merged object
+merged_RNA_ATAC$major.celltype[atac_cells] <- scATAC_brain$predicted_celltype
+
+# Now, you can visualize or analyze the merged object with the added predictions
+# For example, replotting UMAP with the new cell type annotations
+DimPlot(merged_RNA_ATAC, group.by = c("dataset", "major.celltype", "Pathology"))
+
+merged_RNA_ATAC_metadata <- merged_RNA_ATAC@meta.data
+
+RNA + ATAC
+```
+
+### Plotting cell markers
+
+Now, you can visualize or analyze the merged object with the added predictions. For example, replotting UMAP with the new cell type annotations
+
+```{r}
+### ploting Cells marekrs 
+DefaultAssay(scRNA_brain) <- "RNA"
+
+SPI1_RNA <- FeaturePlot(scRNA_brain,"SPI1",min.cutoff = 0,raster=FALSE) + 
+  scale_colour_gradientn(colours = brewer.pal(n = 11, name = "Reds")) + ggtitle("SPI1 - Microglia - RNA")
+
+
+DefaultAssay(scATAC_brain) <- "ACTIVITY"
+
+SPI1_ATAC <- FeaturePlot(scATAC_brain,"SPI1",min.cutoff = 0,raster=FALSE) + 
+  scale_colour_gradientn(colours = brewer.pal(n = 11, name = "Reds")) + ggtitle("SPI1 - Microglia - ATAC")
+
+
+#jpeg("EBI_course_2024/figs/UMAP_Microglia_Marker_RNA_ATAC.jpeg",width = 10, height =7, units = 'in', res=200)
+plot_grid(SPI1_RNA,SPI1_ATAC)
+#dev.off()
+```
+
+You can visualise the microglial subcluster, or your cell of interest using known markers. In this case, we have used SPI1, IRF8 and CEBPA genes for the microglial cluster. We visualize the microglial subcluster using known markers and compare gene expression profiles between RNA and ATAC data. These visualizations provide insights into the molecular characteristics and regulatory mechanisms associated with different cell types or states in the integrated dataset.
+
+```{r}
+#jpeg("../figures/FeaturePlot_ECs_All_markers_and_VWF.jpeg",width = 13, height = 9, units = 'in', res=150)
+FeaturePlot(merged_RNA_ATAC,c("SPI1","IRF8","CEBPA"),min.cutoff = 0,raster=FALSE)
+#dev.off()
+```
+
+For the downstream analysis we will combined the results from ATAC-seq and RNA-seq and won't require using the RNAseq and ATACseq integrated. 
+

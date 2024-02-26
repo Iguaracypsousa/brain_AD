@@ -1,0 +1,227 @@
+---
+title: "Tutorial 5. CCC Analysis with scRNA-seq dataset"
+author: "Iguaracy Souza and Umran YAMAN"
+date: 'Compiled: `r Sys.Date()`'  
+output: 
+  html_document:
+    toc: TRUE
+    code_folding:  "show"
+    theme: united
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 95),
+  warning = FALSE,
+  error = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  fig.width = 8,
+  time_it = TRUE
+)
+```
+
+### Data and library import
+
+Load necessary libraries, and read in the preprocessed scRNA-seq dataset.
+
+```{r}
+suppressPackageStartupMessages({
+  library("Seurat")
+  library("tidyverse")
+  library("magrittr")
+  library("liana")
+  library("dplyr")
+  library("ggplot2")
+  library("patchwork")
+  library("knitr")
+})
+```
+
+```{r}
+scRNA_brain <- readRDS("../data_to_delete/scRNA_brain_seurat_QC.rds")
+```
+
+### Split the dataset
+
+Split the data by 'Pathology' to separate cells based on their pathology status, since we would like to see CCC in through the disease progression.
+
+```{r}
+Idents(scRNA_brain) <- scRNA_brain$major.celltype
+data_split <- SplitObject(scRNA_brain, split.by = "Pathology")
+```
+
+### Run LIANA 
+
+Initialize a list to store LIANA results for each subset.
+
+
+```{r}
+liana_results <- list()
+
+# Run LIANA for each subset
+for (subset_name in names(data_split)) {
+  print(paste("Processing", subset_name))
+  
+  # Assuming that the LIANA wrap function works directly on a Seurat object
+  liana_subset_result <- liana_wrap(data_split[[subset_name]])
+  
+  # Store the result
+  liana_results[[subset_name]] <- liana_subset_result
+  
+}
+```
+
+### Aggregate the LIANA results 
+
+Now, liana_results contains all the LIANA results for each cell type. Initialize an empty list for storing aggregated results for all pathologies.
+
+
+```{r}
+aggregated_liana_all <- list()
+# Process and save results for each subset
+for (subset_name in names(liana_results)) {
+  print(paste("Aggregating and filtering results for", subset_name))
+  
+  # Assuming liana_aggregate() and the filtering are correctly applied on your liana results
+  # Aggregate results
+  aggregated_liana <- liana_results[[subset_name]] %>% 
+    liana_aggregate()
+  
+  # Filter results
+  filtered_liana <- aggregated_liana %>%
+    dplyr::filter(aggregate_rank <= 0.05)  # Ensure dplyr is specified to avoid method conflicts
+  
+  # Store the aggregated (and optionally filtered) results in the list
+  aggregated_liana_all[[subset_name]] <- filtered_liana
+  
+  # Save the filtered results to a CSV file
+  csv_filename <- paste0("../data_to_delete/Cell_cell_results/LIANA_scRNA_Brain_", subset_name, ".csv")
+  write.csv(filtered_liana, csv_filename, row.names = FALSE)
+  
+  print(paste("Results saved for", subset_name, "in", csv_filename))
+}
+```
+
+### Check cell-cell interactions by pathology
+
+In healthy cases, we have the microglia communicating microglia and vasculature only, probably due to protect homoestatis. Signatures are given here is not AD pathology related.
+
+```{r}
+major.celltype <- levels(scRNA_brain$major.celltype)
+major.celltype
+
+# Specify the cell type of interest
+cell_type_of_interest <- "Mic"  # Replace with the cell type(s) of you're interest
+
+##cell sending the signal (Ligand)
+###Non AD
+# Adjust the function call based on how 'liana_dotplot' is implemented and expects its arguments - sender
+dotplot_Mic_source_nonAD <- liana_dotplot(
+  aggregated_liana_all$nonAD,
+  source_groups = c(cell_type_of_interest),  # Adjust this based on how your cell types are categorized (source or target)
+  target_groups = NULL,  # Adjust target groups as needed or based on your specific analysis requirements
+  ntop = 20  # Assuming you want the top 20 interactions
+)
+
+tiff("../figures/dotplot_Mic_source_nonAD.tiff", units="in", width=10, height=15, res=300)
+dotplot_Mic_source_nonAD
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_source_nonAD.tiff")
+```
+
+We move onto the mild AD pathology, where mainly amyloid pathology burden is seen in lower degrees. We can say that this microglial response is due to the amyloid response in early AD. We now see that the cell types microglia interact is increasing.  
+
+
+```{r}
+##Early AD
+dotplot_Mic_source_earlyAD <- liana_dotplot(
+  aggregated_liana_all$earlyAD,
+  source_groups = c(cell_type_of_interest),  # Adjust this based on how your cell types are categorized (source or target)
+  target_groups = NULL,  # Adjust target groups as needed or based on your specific analysis requirements
+  ntop = 20  # Assuming you want the top 20 interactions
+)
+tiff("../figures/dotplot_Mic_source_earlyAD.tiff", units="in", width=10, height=15, res=300)
+dotplot_Mic_source_earlyAD
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_source_earlyAD.tiff")
+```
+
+
+```{r}
+##Late AD
+dotplot_Mic_source_lateAD <- liana_dotplot(
+  aggregated_liana_all$lateAD,
+  source_groups = c(cell_type_of_interest),  # Adjust this based on how your cell types are categorized (source or target)
+  target_groups = NULL,  # Adjust target groups as needed or based on your specific analysis requirements
+  ntop = 20  # Assuming you want the top 20 interactions
+)
+
+tiff("../figures/dotplot_Mic_source_lateAD.tiff", units="in", width=10, height=15, res=300)
+dotplot_Mic_source_lateAD
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_source_lateAD.tiff")
+
+tiff("../figures/dotplot_Mic_source_allAD.tiff", units="in", width=12, height=30, res=300)
+(dotplot_Mic_source_nonAD | dotplot_Mic_source_earlyAD | dotplot_Mic_source_lateAD) +
+  plot_annotation(title = "LIANA Dot Plots: Non AD vs Early AD vs Late AD")
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_source_allAD.tiff")
+```
+
+
+### Adjust Liana plots - Try it yourself!
+
+Adjust the function call based on how 'liana_dotplot' is implemented and expects its arguments -between  sender (ligand) and receiver (receptor)
+
+```{r}
+###Non AD
+dotplot_Mic_target_nonAD <- liana_dotplot(
+  aggregated_liana_all$nonAD,
+  source_groups = NULL,  # Adjust this based on how your cell types are categorized (source or target)
+  target_groups = c(cell_type_of_interest),  # Adjust target groups as needed or based on your specific analysis requirements
+  ntop = 20  # Assuming you want the top 20 interactions
+)
+
+tiff("../figures/dotplot_Mic_source_nonAD_adjust.tiff", units="in", width=10, height=15, res=300)
+dotplot_Mic_target_nonAD
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_nonAD_adjust.tiff")
+
+##Early AD
+dotplot_Mic_target_earlyAD <- liana_dotplot(
+  aggregated_liana_all$earlyAD,
+  source_groups = NULL,  # Adjust this based on how your cell types are categorized (source or target)
+  target_groups = c(cell_type_of_interest),  # Adjust target groups as needed or based on your specific analysis requirements
+  ntop = 20  # Assuming you want the top 20 interactions
+)
+
+tiff("../figures/dotplot_Mic_source_earlyAD_adjust.tiff", units="in", width=10, height=15, res=300)
+dotplot_Mic_target_earlyAD
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_earlyAD_adjust.tiff")
+
+##Late AD
+dotplot_Mic_target_lateAD <- liana_dotplot(
+  aggregated_liana_all$lateAD,
+  source_groups = NULL,  # Adjust this based on how your cell types are categorized (source or target)
+  target_groups = c(cell_type_of_interest),  # Adjust target groups as needed or based on your specific analysis requirements
+  ntop = 20  # Assuming you want the top 20 interactions
+)
+
+tiff("../figures/dotplot_Mic_source_lateAD_adjust.tiff", units="in", width=10, height=15, res=300)
+dotplot_Mic_target_lateAD
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_lateAD_adjust.tiff")
+
+tiff("../figures/dotplot_Mic_source_allAD_adjust.tiff", units="in", width=10, height=15, res=300)
+(dotplot_Mic_target_nonAD | dotplot_Mic_target_earlyAD | dotplot_Mic_target_lateAD) +
+  plot_annotation(title = "LIANA Dot Plots: Non AD vs Early AD vs Late AD")
+invisible(dev.off())
+include_graphics("../figures/dotplot_Mic_allAD_adjust.tiff")
+```
+
+
+
