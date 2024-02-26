@@ -1,0 +1,265 @@
+---
+title: "Tutorial 1. Pre-processing ATAC-seq QC"
+author: "Iguaracy Souza and Umran YAMAN"
+date: 'Compiled: `r Sys.Date()`'  
+output: 
+  html_document:
+    toc: TRUE
+    code_folding:  "show"
+    theme: united
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 95),
+  warning = FALSE,
+  error = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  fig.width = 8,
+  time_it = TRUE
+)
+```
+
+### Background: 
+
+Recent studies have identified numerous non-coding loci associated with Alzheimer’s disease (AD) risk, yet their underlying mechanisms and the transcriptional regulatory circuitry specific to AD remain poorly elucidated. In this investigation, we conducted a comprehensive analysis of the epigenomic and transcriptomic landscapes in 850,000 nuclei derived from AD and healthy prefrontal cortex tissues of 92 individuals. Our aim was to construct a detailed map of the brain regulome, encompassing epigenomic profiles, transcriptional regulators, co-accessibility modules, and peak-to-gene links in a cell-type-specific context. To achieve this, we devised novel methods for multimodal integration and the identification of regulatory modules through peak-to-gene linking. Our findings reveal an enrichment of AD risk loci in microglial enhancers and implicate specific transcription factors, such as SPI1, ELF2, and RUNX1. Additionally, we identified 9,628 cell-type-specific ATAC-QTL loci, which, when integrated with peak-to-gene links, allowed us to prioritize regulatory circuits associated with AD variants. Notably, we observed differential accessibility in regulatory modules, with glia showing changes in late-stage AD and neurons exhibiting alterations in early-stage AD. Strikingly, late-stage AD brains displayed a global dysregulation of the epigenome, indicative of epigenomic erosion and loss of cell identity.
+
+### Dataset
+
+Load the downsampled ATAC-seq dataset, which could be found [here](link will be putted here, either dropbox or gdrive). The dataset consists 0.05% of each cell type proportion out of 114k scATAC-seq dataset which could be found [here](https://compbio.mit.edu/ad_epigenome/). The paper is [Xiong et al. (2023)](https://www.sciencedirect.com/science/article/pii/S0092867423009741?via%3Dihub) . This dataset is originally downsampled per cell type proportion (0.05%), and the original file can be found on the link [PeakMatrix.TSS6.cleaned.rds](https://personal.broadinstitute.org/bjames/AD_snATAC/TSS6_highQC)
+Load the required libraries for the quality control steps of the scATAC-seq dataset
+
+```{r, include=TRUE}
+suppressPackageStartupMessages({
+  library(zellkonverter)   # For cell type annotation
+  library(ggplot2)         # For data visualization
+  library(reticulate)      # For Python integration
+  library(SingleCellExperiment)
+  library(AnnotationDbi)
+  library(org.Hs.eg.db)
+  library(EnsDb.Hsapiens.v86)
+  library(scater)          # Single-cell analysis tools
+  library(Matrix)
+  library(Seurat)          # Single-cell data integration and analysis
+  library(DoubletFinder)   # Identifying doublets in single-cell datasets
+  library(dplyr)
+  library(Signac)          # Tools for single-cell epigenomics
+  library(biovizBase)      # Base functions for bioviz packages
+})
+```
+
+### Downsampling process
+
+```{r}
+#Converting from Python to R
+###Load data
+# Read the h5ad file
+scRNA_ATAC_brain <- readRDS("../data/PeakMatrix.TSS6.cleaned.rds")
+
+# Check cell type information
+metadata <- as.data.frame(colData(scRNA_ATAC_brain))
+table(colData(scRNA_ATAC_brain)$Celltype1)
+
+##downsample by 5% by cell type
+set.seed(123) # For reproducibility
+downsampled_cells <- lapply(split(colnames(scRNA_ATAC_brain), colData(scRNA_ATAC_brain)$Celltype1), function(cells) {
+  sample(cells, size = ceiling(length(cells) * 0.05))
+})
+
+# Flatten the list to get a vector of cell names
+downsampled_cells <- unlist(downsampled_cells)
+
+scRNA_ATAC_brain_downsampled_data <- scRNA_ATAC_brain[, downsampled_cells]
+# Check the dimensions of the downsampled data
+dim(scRNA_ATAC_brain_downsampled_data)
+
+# Check the new distribution of cell types
+table(colData(scRNA_ATAC_brain_downsampled_data)$Celltype4)
+#########
+
+
+###Convert RangedSummarizedExperiment to seurat object 
+
+
+# Extract the counts matrix again
+counts <- assay(scRNA_ATAC_brain_downsampled_data, "PeakMatrix")
+
+# Create a new Seurat object
+scRNA_ATAC_brain_seurat <- CreateSeuratObject(counts = counts)
+
+# Add metadata (if needed)
+metadata <- as.data.frame(colData(scRNA_ATAC_brain_downsampled_data))
+rownames(metadata) <- colnames(scRNA_ATAC_brain_seurat)
+scRNA_ATAC_brain_seurat@meta.data <- metadata
+
+# Extract genomic ranges and create a Chromatin Assay
+granges <- rowRanges(scRNA_ATAC_brain_downsampled_data)
+# get gene annotations for hg38
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevels(annotation) <- paste0('chr', seqlevels(annotation))
+genome(annotation) <- "hg38"
+chrom_assay <- CreateChromatinAssay(counts = counts, ranges = granges, genome = 'hg38',annotation = annotation)
+scRNA_ATAC_brain_seurat[['ATAC']] <- chrom_assay
+```
+
+
+
+Load the dataset using readRDS function. The rds file can be found on the dropbox link above. 
+
+```{r,include=TRUE}
+#we can put the link to the dropbox here as well. They can directly download it as rds
+#scRNA_ATAC_brain_seurat_QC <- readRDS("../data_to_delete/scATAC_brain_downsampled_data.rds")
+DefaultAssay(scRNA_ATAC_brain_seurat) <- 'ATAC'
+```
+
+
+### TSS Enrichment Score and QC Plots
+
+TSS (Transcription Start Site) enrichment scores and quality control plots are generated to assess the distribution and enrichment of peaks around transcription start sites. These plots help evaluate the quality and reliability of the ATAC-seq data by examining the distribution of peaks relative to TSS.
+
+The DensityScatter() function enables visualization of the connections between variables stored in the object metadata. Additionally, it serves as a rapid tool for identifying appropriate cutoff values for various quality control (QC) metrics when quantiles=TRUE is specified
+
+```{r,include=TRUE}
+DensityScatter(scRNA_ATAC_brain_seurat, x = 'nCount_ATAC', y = 'TSSEnrichment', log_x = TRUE, quantiles = TRUE)
+```
+
+
+### QC Metrics Violin Plot
+
+VlnPlot from Seurat library is used here to visualize the distribution of key quality control metrics, including the number of peaks per cell (nCount_peaks), TSS enrichment (TSSEnrichment), and the proportion of peaks in blacklist regions (BlacklistRatio). This way, we can identify cells with outlier values in these metrics and subset those out of the range.
+
+
+```{r,include=TRUE}
+# QC Metrics Violin Plot
+VlnPlot(
+  object = scRNA_ATAC_brain_seurat,
+  features = c('nCount_ATAC', 'TSSEnrichment', 'BlacklistRatio'),
+  pt.size = 0.1,
+  ncol = 5
+)
+```
+
+
+### Remove Outliers
+
+The criteria for removal include constraints on the number of peaks, TSS enrichment, and the proportion of peaks in blacklist regions as we have done above.At the end of this step we will have only high-quality cells are retained for subsequent analysis.
+
+
+```{r,include=TRUE}
+scRNA_ATAC_brain_seurat <- subset(
+  x = scRNA_ATAC_brain_seurat,
+  subset = nCount_ATAC > 3000 &
+    nCount_ATAC < 40000 &
+    BlacklistRatio < 0.05 &
+    TSSEnrichment > 3
+)
+scRNA_ATAC_brain_seurat_QC
+```
+
+
+### Normalization and Linear Dimensional Reduction
+
+Normalization in Signac involves a two-step process utilizing term frequency-inverse document frequency (TF-IDF) normalization. This normalization is performed across cells to address differences in cellular sequencing depth and across peaks, assigning higher values to rarer peaks.
+
+For feature selection, the limited dynamic range of scATAC-seq data poses challenges for conventional variable feature selection methods applied in scRNA-seq. Instead, options include choosing the top n% of features (peaks) for dimensional reduction or excluding features present in fewer than n cells using the FindTopFeatures() function. In our case, we opt to use all features, but you can experiment with subsets of features (e.g., by setting min.cutoff to 'q75' for the top 25% of peaks), which can yield similar results with faster runtimes. Features selected for dimensional reduction are automatically designated as VariableFeatures() for the Seurat object.
+
+For dimension reduction, Signac employs singular value decomposition (SVD) on the TF-IDF matrix, using the previously selected features (peaks). This process yields a reduced-dimensional representation of the object, akin to the output of principal component analysis (PCA) in scRNA-seq for users familiar with that context.
+
+Finding top features, running TF-IDF (Term Frequency-Inverse Document Frequency) normalization, and performing SVD (Singular Value Decomposition) for linear dimensional reduction for clustering and visualization:
+
+```{r,include=TRUE}
+# Find top features, run TF-IDF, and run SVD for normalization and linear dimensional reduction
+scRNA_ATAC_brain_seurat <- FindTopFeatures(scRNA_ATAC_brain_seurat, min.cutoff = 5)
+scRNA_ATAC_brain_seurat <- RunTFIDF(scRNA_ATAC_brain_seurat)
+scRNA_ATAC_brain_seurat <- RunSVD(scRNA_ATAC_brain_seurat)
+```
+
+### Depth Correlation Plot
+
+The initial Latent Semantic Indexing (LSI) component frequently reflects sequencing depth, representing technical variation rather than biological differences. In such instances, it is advisable to exclude this component from subsequent analyses. The correlation between each LSI component and sequencing depth can be evaluated using the DepthCor() function.
+
+In other words, we plot the correlation plot using DepthCor function to assess the correlation between the number of sequencing reads (depth) and other quality control metrics. We can check for potential biases related to sequencing depth in the downsampled and subsetted dataset.
+
+```{r,include=TRUE}
+# Depth Correlation Plot
+DepthCor(scRNA_ATAC_brain_seurat)
+```
+
+
+### Non-linear Dimension Reduction and Clustering
+
+We can perform the dimension reduction using 2 to 30, usually the first one is related to technical biases. We will be able toidentificaty those of cell clusters based on chromatin accessibility patterns.
+
+```{r,include=TRUE}
+# Non-linear dimension reduction and clustering using UMAP
+scRNA_ATAC_brain_seurat <- RunUMAP(object = scRNA_ATAC_brain_seurat, reduction = 'lsi', dims = 2:30)
+DimPlot(object = scRNA_ATAC_brain_seurat, label = TRUE, group.by = "Celltype1") + NoLegend()
+
+```
+
+
+### Add the gene score to ATAC-seq dataset
+
+```{r}
+#Add the Gene score to the ATAC-seq object 
+metadata_scRNA_ATAC_brain_seurat <- scRNA_ATAC_brain_seurat@meta.data
+scRNA_ATAC_brain_geneScore <- readRDS("../data/GeneScoreMatrix.TSS6.cleaned.rds")
+##get Gene score 
+metadata_geneScore <- as.data.frame(colData(scRNA_ATAC_brain_geneScore))
+# Extract gene names or identifiers from rowData
+gene_names <- rowData(scRNA_ATAC_brain_geneScore)$name
+
+
+# Check the first few names to ensure they are what you expect
+head(gene_names)
+
+```
+
+
+```{r}
+# Find common row names with scRNA_ATAC_brain_seurat
+DefaultAssay(scRNA_ATAC_brain_seurat) <- 'RNA'
+common_rows <- intersect(rownames(metadata_scRNA_ATAC_brain_seurat), rownames(metadata_geneScore))
+
+# Subset both data frames to keep only rows with common row names
+metadata_geneScore <- metadata_geneScore[common_rows, ]
+##select fragments
+head(metadata_geneScore)
+```
+
+
+```{r}
+# Extract the counts matrix again
+GeneScoreMatrix <- assay(scRNA_ATAC_brain_geneScore, "GeneScoreMatrix")
+# Ensure the length of gene_names matches the number of rows in filtered_matrix
+if (length(gene_names) == nrow(GeneScoreMatrix)) {
+  rownames(GeneScoreMatrix) <- gene_names
+} else {
+  stop("The number of gene names does not match the number of rows in the filtered matrix.")
+}
+# Assuming `metadata_geneScore` holds relevant identifiers in its rows or a specific column
+# If the metadata contains cell identifiers and you want to filter cells:
+common_cells <- intersect(colnames(GeneScoreMatrix), rownames(metadata_geneScore))  # Adjust as necessary
+# Filter columns
+filtered_matrix <- GeneScoreMatrix[, common_cells]
+head(rownames(filtered_matrix))
+# add the gene activity matrix to the Seurat object as a new assay and normalize it
+scRNA_ATAC_brain_seurat[['ACTIVITY']] <- CreateAssayObject(counts = filtered_matrix)
+```
+
+### Save the final data
+
+```{r}
+# Save the final Seurat object
+saveRDS(scRNA_ATAC_brain_seurat, file ="../data/scATAC_seurat_QC_fix.rds")
+```
+
+```{r}
+sessionInfo()
+```
+
+
+
