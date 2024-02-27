@@ -1,0 +1,97 @@
+---
+title: "Tutorial 4. Differential Expression Analysis"
+author: "Iguaracy Souza and Umran YAMAN"
+date: 'Compiled: `r Sys.Date()`'  
+output: 
+  html_document:
+    toc: TRUE
+    code_folding:  "show"
+    theme: united
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 95),
+  warning = FALSE,
+  error = TRUE,
+  echo = TRUE,
+  message = FALSE,
+  fig.width = 8,
+  time_it = TRUE
+)
+```
+
+### Data and library import
+
+Load necessary libraries, and read in the preprocessed scRNA-seq dataset.
+
+
+```{r}
+suppressPackageStartupMessages({
+  library("Seurat")
+  library("tidyverse")
+  library("magrittr")
+  library("dplyr")
+})
+```
+
+Make sure you have choosen the major.celltype as Idents, since we will be looking at each specific cell type, and its transcriptomic signature with pathology. 
+
+```{r}
+scRNA_brain <- readRDS("../data/scRNA_brain_seurat_QC.rds")
+Idents(scRNA_brain) <- scRNA_brain$major.celltype
+scRNA_brain@meta.data$cell_type <- scRNA_brain$major.celltype
+```
+
+### Split the dataset
+
+Assuming your Seurat object is named 'scRNA_brain'. We split the dataset, which was first set with cell types. Now we split the dataset data by 'Pathology'
+
+```{r}
+data_split <- SplitObject(scRNA_brain, split.by = "Pathology")
+```
+
+
+### Calculate markers associated with pathology per cell type
+
+Initialize a list to store results, markers_list now contains all the differential expression results
+
+```{r}
+markers_list <- list()
+```
+
+Loop over the split data:
+
+```{r}
+for (i in names(data_split)) {
+  print(paste("Processing", i))
+  
+  # Get cell types
+  cell_types <- unique(data_split[[i]]@meta.data$cell_type)
+  
+  # Loop through each cell type
+  for (cell_type in cell_types) {
+    print(paste("Analyzing cell type", cell_type))
+    
+    # Check the number of cells in this cell type
+    num_cells <- sum(data_split[[i]]@meta.data$cell_type == cell_type)
+    
+    if (num_cells < 3) {
+      print(paste("Skipping cell type", cell_type, "- fewer than 3 cells"))
+      next  # Skip to the next cell type
+    }
+    
+    # Perform differential expression analysis
+    markers <- FindMarkers(data_split[[i]], ident.1 = cell_type,only.pos = TRUE, min.pct = 0.5, logfc.threshold = 0.25)
+    
+    # Store the results
+    markers_list[[paste(i, cell_type, sep = "_")]] <- markers
+    
+    # Optional: Save results to files
+    write.csv(markers, paste0("../data/Table_DEGs/Brain_DEGs_", i, "_", cell_type, ".csv"))
+  }
+}
+```
+
