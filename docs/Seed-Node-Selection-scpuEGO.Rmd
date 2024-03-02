@@ -1,6 +1,6 @@
 ---
-title: "Tutorial 7. Seed Node Selection - scpuEGO"
-author: "Iguaracy Souza and Umran YAMAN"
+Title: "Tutorial 7: Selecting Seed Nodes for scphuEGO Analysis"
+author: "Iguaracy SouSa and Umran YAMAN"
 date: 'Compiled: `r Sys.Date()`'  
 output: 
   html_document:
@@ -36,18 +36,22 @@ suppressPackageStartupMessages({
   library("decompr")
 })
 ```
+##The goal of this pipeline is to merge the three layers of proteins to run scphuEGO
 
+### Get the receptors, TFs, and downstream DEGs involved in the biological process enriched for the (Receptors + Tfs)
+### We do approach to remove a part of the noise of using all DEGs for each cell cluster as one of the layers for scphuEGO
 
-### Load BP pathways and Genes
+##Loading Biological Pathways and Gene Data
 
 
 ```{r}
 BP_Genes_GO_BP <- read_csv("../data_to_delete/BP_All_genes.csv")
-##choose the dataset for enrichment
+### choose the dataset for enrichment
 dbs <- listEnrichrDbs()
 ```
 
-### Define the groups and cell types
+### Identifying Groups and Cell Types
+### Reads in single-cell RNA sequencing data, extracting information on major cell types and pathology groups from the ### dataset.
 
 
 ```{r}
@@ -57,7 +61,10 @@ groups <- levels(scRNA_brain$Pathology)
 groups
 ```
 
-### Get the receptors by cell type
+### Receptors Analysis by Cell Type
+
+### Function to load, process, and filter tables for the analysis of differentially expressed receptors by cell type.
+###This includes merging results, filtering for unique receptors, and saving processed data.
 
 Define the function to load tables and process data:
 
@@ -87,8 +94,7 @@ load_tables <- function(cell_type, degs_file, ccc_file) {
 }
 
 ```
-
-
+### Loop to get the differentially expressed receptors predicted by LIANA by cell type and pathology
 
 ```{r}
 # Loop over each group
@@ -108,10 +114,13 @@ for (group in groups) {
   }
 }
 ```
+### Enrichment Analysis for Each Group and Cell Type
+### Implements a loop to process data across different groups and cell types, focusing on identifying the enriched DEGs
+### related to receptors and transcription factors (TFs) based on pathology.
 
 
 ```{r}
-# Define the function to get enriched genes Fro receptors and TFs by pathology
+# Define the function to get enriched genes From receptors and TFs by pathology
 get_enriched_genes <- function(receptor_file, tf_file,cell_type, output_file) {
   
   # Read receptor data
@@ -151,7 +160,7 @@ get_enriched_genes <- function(receptor_file, tf_file,cell_type, output_file) {
 
 ```
 
-
+### Loop to identify Receptor + TFs significant pathways and their downstream DEGs 
 
 ```{r}
 # Loop over each group and cell type
@@ -174,7 +183,10 @@ for (group in groups) {
   }
 }
 ```
-
+### Preparing Data for scphuEGO
+### Function for processing cell types and groups, aiming to identify DEGs, receptors, and TFs 
+### present in significant pathways. This process involves merging the three layers and
+### saving the final list of seed nodes for network generation in the scphuEGO.
 
 ```{r}
 ###########Now get the TF, Receptors and DEGs present on those pathways to generate the networks
@@ -240,6 +252,7 @@ process_cell_type_group <- function(cell_type, group) {
   }
 }
 
+### Final loop to generate and save seed nodes
 
 ####
 # Loop over each group and cell type
